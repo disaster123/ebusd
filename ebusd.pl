@@ -12,8 +12,8 @@ use Device::SerialPort;
 use IO::Socket;
 use IO::Select;
 
-system( "./resetusb /dev/bus/usb/001/005" );
-sleep( 10 );
+# system( "./resetusb /dev/bus/usb/001/005" );
+# sleep( 10 );
 
 my $usb_dev = Device::SerialPort->new( PORT ) or die "Can't open device: $!\n";
 my $udp_client = IO::Socket::INET->new( Proto => "udp", PeerHost => IP_SYM_IP, PeerPort => 8814 )
@@ -34,57 +34,64 @@ $usb_dev->read_char_time( 0 );        # don't wait for each character
 $usb_dev->read_const_time( 1000 );    # 1 second per unfulfilled "read" call
 $usb_dev->write_settings;
 
-my $chars   = 0;
-my $buffer  = "";
-my $timeout = 10;
-while ( $timeout > 0 ) {
-    my ( $count, $saw ) = $usb_dev->read( 10 ) or die "usb dev read fail: $!\n";    # will read _up to_ 10 chars
+my $chars        = 0;
+my $buffer       = "";
+my $expected_msg = "";
+my $timeout      = 30;
+my @data_to_send = ();
 
-    while ( $select->can_read( 0.5 ) && $udp_server->recv( my $datagram, 1024 ) ) {
+while ( $timeout > 0 ) {
+    my ( $count, $saw ) = $usb_dev->read( 1 ) or die "usb dev read fail: $!\n";    # read only char by char
+
+    while ( $select->can_read( 0.01 ) && $udp_server->recv( my $datagram, 1024 ) ) {
 
         # cleanup datagram
         $datagram =~ s/ //g;
 
         print "UDP got: $datagram\n";
 
-        $datagram = pack( "H*", $datagram );
-        my $count_out = $usb_dev->write( $datagram ) or die "usb dev write fail: $!\n";
-        warn "write failed\n" unless ( $count_out );
-        warn "write incomplete\n" if ( $count_out != length( $datagram ) );
+        push( @data_to_send, $datagram );
     }
 
     if ( $count > 0 ) {
+        $timeout = 30;
         $chars += $count;
 
-        $buffer .= uc( unpack( "H*", $saw ) );
+        $saw = uc( unpack( "H*", $saw ) );
 
-        #print "B: ".$buffer,"\n";
-        if ( $buffer =~ /AA/ ) {
-            my @msg = split( /AA/, $buffer );
+        #print "B: ".$saw,"\n";
+        if ( $saw eq "AA" ) {
+
+            # syn byte received send something from the queue
+            if ( $buffer eq "" && defined( my $e = shift @data_to_send ) ) {
+		$expected_msg = $e;
+                $e = pack( "H*", $e );
+                my $count_out = $usb_dev->write( $e ) or die "usb dev write fail: $!\n";
+                warn "write failed\n" unless ( $count_out );
+                warn "write incomplete\n" if ( $count_out != length( $e ) );
+            }
 
             #use Data::Dumper;
             #print Dumper(\@msg);
-            my $lok = 0;
-            foreach my $i ( 0 .. $#msg ) {
-                if (
-                    length( $msg[$i] ) >= 17
-                    && (   ( defined( $msg[ $i + 1 ] ) && $msg[ $i + 1 ] eq "" )
-                        || ( $buffer =~ /^(AA)*$msg[$i]AA/ ) )
-                  )
-                {
-                    print "OK: $msg[$i]\n";
-                    udp_send( $msg[$i] );
-                    $lok = $i + 1;
-                }
-            }
-            $buffer = join( "AA", @msg[ $lok .. $#msg ] );
-
-            # print "A: ".$buffer,"\n";
-            $timeout = 10;
+	    # min length is 6 byte (hex * 2)
+            if ( length( $buffer ) > 2*6 ) {
+                print "OK: $buffer\n";
+                udp_send( $buffer );
+                $buffer = "";
+            } elsif (length($buffer) > 0) {
+		    print "skip inv.: $buffer\n";
+		$buffer = "";
+	    } 
         }
-
-        # Check here to see if what we want is in the $buffer
-        # say "last" if we find it
+        else {
+            # non syn byte add to buffer
+            $buffer .= $saw;
+	    if ($buffer eq $expected_msg) {
+		    print "removing our own msg from buffer: $expected_msg\n";
+		    $buffer = "";
+		    $expected_msg = "";
+	    }
+        }
     }
     else {
         $timeout--;

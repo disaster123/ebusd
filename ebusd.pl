@@ -38,7 +38,7 @@ my $chars        = 0;
 my $buffer       = "";
 my $timeout      = 30;
 my @data_to_send = ();
-
+my $zero_detect  = 0;
 while ( $timeout > 0 ) {
     my ( $count, $saw ) = $usb_dev->read( 1 ) or die "usb dev read fail: $!\n";    # read only char by char
 
@@ -48,36 +48,14 @@ while ( $timeout > 0 ) {
 
         $saw = uc( unpack( "H*", $saw ) );
 
+        if ( $zero_detect ) {
+            $zero_detect = 0;
+            next if $saw eq "00";
+        }
+
         #print "B: ".$saw,"\n";
         if ( $saw eq "AA" ) {
-            my ( $BlockingFlags, $InBytes, $OutBytes, $ErrorFlags ) = $usb_dev->status;
 
-            # print "-$InBytes $OutBytes-\n";
-
-            # syn byte received send something from the queue
-            # if ( $buffer eq "" && defined( my $e = shift @data_to_send ) ) {
-            if ( $InBytes == 0 && defined( my $e = shift @data_to_send ) ) {
-                my $abort       = 0;
-                my $e_bin       = pack( "H*", $e );
-                my @msg_to_send = split( //, $e_bin );
-                foreach my $byte ( @msg_to_send ) {
-                    my $count_out = $usb_dev->write( $byte ) or die "usb dev write fail: $!\n";
-                    my ( $count, $saw ) = $usb_dev->read( 1 );
-
-                    # print unpack("H*",$byte)." ".unpack("H*", $saw)."\n";
-                    if ( $saw ne $byte ) {
-
-                        # requeue
-                        @data_to_send = ( $e, @data_to_send );
-                        $abort = 1;
-                        last;
-                    }
-                }
-                print "msg send ok: $e Queue:" . scalar( @data_to_send ) . "\n" if !$abort;
-            }
-
-            #use Data::Dumper;
-            #print Dumper(\@msg);
             # min length is 6 byte (hex * 2)
             if ( length( $buffer ) >= 2 * 6 ) {
                 print "OK: $buffer\n";
@@ -88,6 +66,44 @@ while ( $timeout > 0 ) {
                 print "skip inv.: $buffer $saw\n";
                 $buffer = "";
             }
+
+            my ( $BlockingFlags, $InBytes, $OutBytes, $ErrorFlags ) = $usb_dev->status;
+
+            # print "-$InBytes $OutBytes-\n";
+
+            # syn byte received send something from the queue
+            # if ( $buffer eq "" && defined( my $e = shift @data_to_send ) ) {
+            if ( $InBytes == 0 && defined( my $e = shift @data_to_send ) ) {
+                my $abort       = 0;
+                my $e_bin       = pack( "H*", $e );
+                my @msg_to_send = split( //, $e_bin );
+                my $byte_count  = 0;
+                foreach my $byte ( @msg_to_send ) {
+                    $byte_count++;
+                    my $count_out = $usb_dev->write( $byte ) or die "usb dev write fail: $!\n";
+                    my ( $count, $saw ) = $usb_dev->read( 1 );
+
+                    # print unpack("H*",$byte)." ".unpack("H*", $saw)."\n";
+                    if ( $saw ne $byte ) {
+                        $saw = uc( unpack( "H*", $saw ) );
+
+                        # if error occoured on first byte and it's not another SYN add it to the buffer
+                        if ( $byte_count == 1 && $saw ne "AA" ) {
+                            $buffer .= uc( unpack( "H*", $saw ) );
+                        }
+
+                        # requeue
+                        @data_to_send = ( $e, @data_to_send );
+                        $abort = 1;
+                        last;
+                    }
+                }
+                if ( !$abort ) {
+                    print "msg send ok: $e Queue:" . scalar( @data_to_send ) . "\n";
+                    $zero_detect = 1;
+                }
+            }
+
         }
         else {
             # non syn byte add to buffer

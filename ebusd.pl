@@ -36,7 +36,6 @@ $usb_dev->write_settings;
 
 my $chars        = 0;
 my $buffer       = "";
-my $expected_msg = "";
 my $timeout      = 30;
 my @data_to_send = ();
 
@@ -63,34 +62,43 @@ while ( $timeout > 0 ) {
         if ( $saw eq "AA" ) {
 
             # syn byte received send something from the queue
-            if ( $buffer eq "" && defined( my $e = shift @data_to_send ) ) {
-		$expected_msg = $e;
-                $e = pack( "H*", $e );
-                my $count_out = $usb_dev->write( $e ) or die "usb dev write fail: $!\n";
-                warn "write failed\n" unless ( $count_out );
-                warn "write incomplete\n" if ( $count_out != length( $e ) );
+            # if ( $buffer eq "" && defined( my $e = shift @data_to_send ) ) {
+            if ( defined( my $e = shift @data_to_send ) ) {
+                my $abort       = 0;
+                my $e_bin       = pack( "H*", $e );
+                my @msg_to_send = split( //, $e_bin );
+                foreach my $byte ( @msg_to_send ) {
+                    my $count_out = $usb_dev->write( $byte ) or die "usb dev write fail: $!\n";
+                    my ( $count, $saw ) = $usb_dev->read( 1 );
+
+                    # print unpack("H*",$byte)." ".unpack("H*", $saw)."\n";
+                    if ( $saw ne $byte ) {
+
+                        # requeue
+                        @data_to_send = ( $e, @data_to_send );
+                        $abort = 1;
+                        last;
+                    }
+                }
+                print "msg send ok: $e Queue:" . scalar( @data_to_send ) . "\n" if !$abort;
             }
 
             #use Data::Dumper;
             #print Dumper(\@msg);
-	    # min length is 6 byte (hex * 2)
-            if ( length( $buffer ) > 2*6 ) {
+            # min length is 6 byte (hex * 2)
+            if ( length( $buffer ) >= 2 * 6 ) {
                 print "OK: $buffer\n";
                 udp_send( $buffer );
                 $buffer = "";
-            } elsif (length($buffer) > 0) {
-		    print "skip inv.: $buffer\n";
-		$buffer = "";
-	    } 
+            }
+            elsif ( length( $buffer ) > 0 ) {
+                print "skip inv.: $buffer $saw\n";
+                $buffer = "";
+            }
         }
         else {
             # non syn byte add to buffer
             $buffer .= $saw;
-	    if ($buffer eq $expected_msg) {
-		    print "removing our own msg from buffer: $expected_msg\n";
-		    $buffer = "";
-		    $expected_msg = "";
-	    }
         }
     }
     else {

@@ -55,8 +55,12 @@ while ( $timeout > 0 ) {
         }
 
         if ( $wait_for_next_syn ) {
-            $wait_for_next_syn = 0 if $saw eq "AA";
-            next;
+            if ( $saw eq "AA" ) {
+                $wait_for_next_syn = 0;
+            }
+            else {
+                next;
+            }
         }
 
         #print "B: ".$saw,"\n";

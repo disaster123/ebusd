@@ -30,8 +30,8 @@ $usb_dev->error_msg( 1 );    # prints hardware messages like "Framing Error"
 $usb_dev->user_msg( 1 );     # prints function messages like "Waiting for CTS"
 $usb_dev->handshake( "none" );
 $usb_dev->buffers( 4096, 4096 );
-$usb_dev->read_char_time( 0 );        # don't wait for each character
-$usb_dev->read_const_time( 1000 );    # 1 second per unfulfilled "read" call
+$usb_dev->read_char_time( 5 );
+$usb_dev->read_const_time( 100 );
 $usb_dev->write_settings;
 
 my $chars        = 0;
@@ -42,16 +42,6 @@ my @data_to_send = ();
 while ( $timeout > 0 ) {
     my ( $count, $saw ) = $usb_dev->read( 1 ) or die "usb dev read fail: $!\n";    # read only char by char
 
-    while ( $select->can_read( 0.01 ) && $udp_server->recv( my $datagram, 1024 ) ) {
-
-        # cleanup datagram
-        $datagram =~ s/ //g;
-
-        print "UDP got: $datagram\n";
-
-        push( @data_to_send, $datagram );
-    }
-
     if ( $count > 0 ) {
         $timeout = 30;
         $chars += $count;
@@ -60,10 +50,13 @@ while ( $timeout > 0 ) {
 
         #print "B: ".$saw,"\n";
         if ( $saw eq "AA" ) {
+            my ( $BlockingFlags, $InBytes, $OutBytes, $ErrorFlags ) = $usb_dev->status;
+
+            # print "-$InBytes $OutBytes-\n";
 
             # syn byte received send something from the queue
             # if ( $buffer eq "" && defined( my $e = shift @data_to_send ) ) {
-            if ( defined( my $e = shift @data_to_send ) ) {
+            if ( $InBytes == 0 && defined( my $e = shift @data_to_send ) ) {
                 my $abort       = 0;
                 my $e_bin       = pack( "H*", $e );
                 my @msg_to_send = split( //, $e_bin );
@@ -104,6 +97,17 @@ while ( $timeout > 0 ) {
     else {
         $timeout--;
     }
+
+    while ( $select->can_read( 0.01 ) && $udp_server->recv( my $datagram, 1024 ) ) {
+
+        # cleanup datagram
+        $datagram =~ s/ //g;
+
+        print "UDP got: $datagram\n";
+
+        push( @data_to_send, $datagram ) if !grep { $_ eq $datagram } @data_to_send;
+    }
+
 }
 
 exit( 1 );

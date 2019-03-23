@@ -34,11 +34,12 @@ $usb_dev->read_char_time( 5 );
 $usb_dev->read_const_time( 100 );
 $usb_dev->write_settings;
 
-my $chars        = 0;
-my $buffer       = "";
-my $timeout      = 30;
-my @data_to_send = ();
-my $zero_detect  = 0;
+my $chars             = 0;
+my $buffer            = "";
+my $timeout           = 30;
+my @data_to_send      = ();
+my $zero_detect       = 0;
+my $wait_for_next_syn = 0;
 while ( $timeout > 0 ) {
     my ( $count, $saw ) = $usb_dev->read( 1 ) or die "usb dev read fail: $!\n";    # read only char by char
 
@@ -51,6 +52,11 @@ while ( $timeout > 0 ) {
         if ( $zero_detect ) {
             $zero_detect = 0;
             next if $saw eq "00";
+        }
+
+        if ( $wait_for_next_syn ) {
+            $wait_for_next_syn = 0 if $saw eq "AA";
+            next;
         }
 
         #print "B: ".$saw,"\n";
@@ -89,18 +95,22 @@ while ( $timeout > 0 ) {
 
                         # if error occoured on first byte and it's not another SYN add it to the buffer
                         if ( $byte_count == 1 && $saw ne "AA" ) {
-                            $buffer .= uc( unpack( "H*", $saw ) );
+                            $buffer = uc( unpack( "H*", $saw ) );
                         }
 
                         # requeue
-                        @data_to_send = ( $e, @data_to_send );
-                        $abort = 1;
+                        @data_to_send      = ( $e, @data_to_send );
+                        $abort             = 1;
+                        $wait_for_next_syn = 1;
                         last;
                     }
                 }
                 if ( !$abort ) {
                     print "msg send ok: $e Queue:" . scalar( @data_to_send ) . "\n";
                     $zero_detect = 1;
+
+                    # our own msg was sent - so add to buffer
+                    $buffer = $e;
                 }
             }
 

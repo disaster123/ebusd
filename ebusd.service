@@ -1,0 +1,16 @@
+[Unit]
+Description=ebusd_sp
+After=network.target
+
+[Service]
+PrivateTmp=true
+Type=simple
+WorkingDirectory=/opt/ebusd_sp
+ExecStart=/opt/ebusd_sp/ebusd.pl
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

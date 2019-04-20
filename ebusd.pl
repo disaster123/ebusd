@@ -12,9 +12,6 @@ use Device::SerialPort;
 use IO::Socket;
 use IO::Select;
 
-# system( "./resetusb /dev/bus/usb/001/005" );
-# sleep( 10 );
-
 my $usb_dev = Device::SerialPort->new( PORT ) or die "Can't open device: $!\n";
 my $udp_client = IO::Socket::INET->new( Proto => "udp", PeerHost => IP_SYM_IP, PeerPort => 8814 )
   or die "Can't create udp client: $@\n";

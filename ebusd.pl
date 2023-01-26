@@ -65,12 +65,12 @@ while ( $timeout > 0 ) {
 
             # min length is 6 byte (hex * 2)
             if ( length( $buffer ) >= 2 * 6 ) {
-                print "OK: $buffer\n";
+		    # print "OK: $buffer\n";
                 udp_send( $buffer );
                 $buffer = "";
             }
             elsif ( length( $buffer ) > 0 ) {
-                print "skip inv.: $buffer $saw\n";
+		    # print "skip inv.: $buffer $saw\n";
                 $buffer = "";
             }
 
@@ -107,7 +107,7 @@ while ( $timeout > 0 ) {
                     }
                 }
                 if ( !$abort ) {
-                    print "msg send ok: $e Queue:" . scalar( @data_to_send ) . "\n";
+			# print "msg send ok: $e Queue:" . scalar( @data_to_send ) . "\n";
                     $zero_detect = 1;
 
                     # our own msg was sent - so add to buffer
@@ -130,7 +130,7 @@ while ( $timeout > 0 ) {
         # cleanup datagram
         $datagram =~ s/ //g;
 
-        print "UDP got: $datagram\n";
+	# print "UDP got: $datagram\n";
 
         push( @data_to_send, $datagram ) if !grep { $_ eq $datagram } @data_to_send;
     }
